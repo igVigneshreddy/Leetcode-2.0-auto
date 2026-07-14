@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Flow",
+  "version": "1.0.0",
+  "description": "Sleek Chrome Extension to track LeetCode problem focus time and stats.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://leetcode.com/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://leetcode.com/problems/*",
+        "http://localhost:8080/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

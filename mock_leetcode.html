@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LeetCode - {{TITLE}}</title>
+  <style>
+    body {
+      background-color: #1a1a1a;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 24px;
+      margin: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background-color: #242424;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.8rem;
+    }
+    .text-title-large {
+      font-size: 1.8rem;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .difficulty {
+      font-weight: bold;
+      margin-bottom: 16px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-block;
+      font-size: 0.9rem;
+    }
+    .text-easy { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
+    .text-medium { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+    .text-hard { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; }
+
+    .description-box {
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 16px;
+      background-color: #1e1e1e;
+      margin-bottom: 20px;
+    }
+    .editor-box {
+      border: 1px solid #333;
+      border-radius: 6px;
+      background-color: #1e1e1e;
+      font-family: 'Courier New', Courier, monospace;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .view-line {
+      line-height: 1.5;
+      white-space: pre;
+    }
+    .btn-submit {
+      background-color: #10b981;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-submit:hover {
+      background-color: #059669;
+    }
+    .result-section {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background-color: #1e1e1e;
+      display: none;
+    }
+    .result-section.active {
+      display: block;
+    }
+    .nav-links {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #333;
+    }
+    .nav-links a {
+      color: #3b82f6;
+      text-decoration: none;
+      margin-right: 15px;
+      font-weight: 500;
+    }
+    .nav-links a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="text-title-large">{{TITLE}}</div>
+    <div class="difficulty {{DIFF_CLASS}}">{{DIFFICULTY}}</div>
+
+    <div class="description-box" data-track-load="description_content">
+      <h3>Description</h3>
+      <p>This is a simulated description for the <strong>{{TITLE}}</strong> problem.</p>
+      <p>Given some inputs, compute the required output and return it. Make sure your runtime complexity is optimal.</p>
+    </div>
+
+    <h3>Code Editor (Monaco Simulation)</h3>
+    <div class="editor-box" id="monaco-editor">
+      <div class="view-line">function {{SLUG}}(args) {</div>
+      <div class="view-line">    // Write your code here</div>
+      <div class="view-line">    console.log("solving {{SLUG}}...");</div>
+      <div class="view-line">    return true;</div>
+      <div class="view-line">}</div>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <button class="btn-submit" id="submit-btn">Submit Code</button>
+      <button class="btn-submit" style="background-color: #ef4444;" id="fail-btn">Submit Wrong Code</button>
+      <span class="language-select-btn" style="background: #333; padding: 8px 12px; border-radius: 4px; font-size: 0.85rem;">
+        <button style="background: none; border: none; color: white; cursor: pointer;">JavaScript</button>
+      </span>
+    </div>
+
+    <div class="result-section" id="result-box">
+      <!-- Submission result elements will be populated here -->
+    </div>
+
+    <div class="nav-links">
+      <h3>Navigate Problems:</h3>
+      <a href="/problems/two-sum/">1. Two Sum (Easy)</a>
+      <a href="/problems/3sum/">15. 3Sum (Medium)</a>
+      <a href="/problems/median-of-two-sorted-arrays/">4. Median of Two Sorted Arrays (Hard)</a>
+    </div>
+  </div>
+
+  <script>
+    const submitBtn = document.getElementById('submit-btn');
+    const failBtn = document.getElementById('fail-btn');
+    const resultBox = document.getElementById('result-box');
+
+    function triggerSubmission(statusText, time, mem) {
+      resultBox.style.display = 'none';
+      resultBox.innerHTML = 'Submitting...';
+      resultBox.style.display = 'block';
+
+      setTimeout(() => {
+        resultBox.innerHTML = `
+          <div data-e2e-locator="submission-result" style="font-size: 1.3rem; font-weight: bold; color: \${statusText === 'Accepted' ? '#10b981' : '#ef4444'}">
+            \${statusText}
+          </div>
+          <div style="margin-top: 8px; font-size: 0.95rem; color: #aaa;">
+            Runtime \${time} ms
+          </div>
+          <div style="font-size: 0.95rem; color: #aaa;">
+            Memory \${mem} MB
+          </div>
+        `;
+      }, 1000);
+    }
+
+    submitBtn.addEventListener('click', () => {
+      triggerSubmission('Accepted', '14', '42.8');
+    });
+
+    failBtn.addEventListener('click', () => {
+      triggerSubmission('Wrong Answer', '0', '0');
+    });
+  </script>
+</body>
+</html>

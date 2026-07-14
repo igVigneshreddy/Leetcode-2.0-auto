@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeetCode Flow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/extension/popup/popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="icon">⚡</span>
+        <h1>LeetCode <span class="accent">Flow</span></h1>
+      </div>
+      <div class="streak-badge" id="streak-container" title="Daily Solve Streak">
+        <span class="streak-icon">🔥</span>
+        <span id="streak-count">0</span>
+      </div>
+    </header>
+
+    <!-- Active Timer Card -->
+    <section class="timer-card glass">
+      <div class="card-header">
+        <span class="badge" id="timer-badge">Idle</span>
+        <span class="difficulty-indicator" id="timer-diff"></span>
+      </div>
+      <h3 id="timer-problem-title">No active problem</h3>
+      
+      <div class="timer-display">
+        <span id="timer-time">00:00:00</span>
+      </div>
+
+      <div class="timer-actions">
+        <button id="btn-play-pause" class="btn btn-primary" disabled>
+          <span class="btn-icon">⏸️</span> <span id="btn-play-pause-text">Pause</span>
+        </button>
+        <button id="btn-reset" class="btn btn-secondary" disabled>
+          Reset
+        </button>
+      </div>
+    </section>
+
+    <!-- AI Automation Card -->
+    <section class="automation-card glass">
+      <div class="card-header">
+        <h2 style="font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <span>🤖</span> AI Auto-Solver
+        </h2>
+        <button id="btn-settings-toggle" class="btn-icon-only" title="Settings" style="background: none; border: none; font-size: 1.1rem; cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: var(--transition-smooth); color: var(--text-secondary);">⚙️</button>
+      </div>
+
+      <!-- Settings Drawer (Collapsible) -->
+      <div id="settings-drawer" class="settings-drawer collapsed">
+        <div class="form-group">
+          <label for="input-openrouter-key">OpenRouter API Key</label>
+          <input type="password" id="input-openrouter-key" placeholder="Enter OpenRouter API Key..." />
+        </div>
+        <div class="form-group">
+          <label for="select-push-method">GitHub Push Method</label>
+          <select id="select-push-method">
+            <option value="local-git">Local Git (Zero Config)</option>
+            <option value="github-api">GitHub API (Remote Push)</option>
+          </select>
+        </div>
+        <div id="github-api-fields" class="github-api-fields collapsed">
+          <div class="form-group">
+            <label for="input-github-token">GitHub Token (PAT)</label>
+            <input type="password" id="input-github-token" placeholder="ghp_..." />
+          </div>
+          <div class="form-group">
+            <label for="input-github-repo">GitHub Repository</label>
+            <input type="text" id="input-github-repo" placeholder="username/repo-name" />
+          </div>
+          <div class="form-group">
+            <label for="input-github-path">Folder Path (optional)</label>
+            <input type="text" id="input-github-path" placeholder="solutions" />
+          </div>
+        </div>
+        <button id="btn-save-settings" class="btn btn-secondary btn-sm" style="width: 100%; margin-top: 8px;">Save Settings</button>
+      </div>
+
+      <!-- Automation Main Panel -->
+      <div class="automation-panel" style="margin-top: 8px; display: flex; flex-direction: column; gap: 10px;">
+        <button id="btn-auto-solve" class="btn btn-primary" style="width: 100%; justify-content: center; font-weight: 600; padding: 10px 16px;">
+          <span class="btn-icon">⚡</span> Auto Solve & Submit
+        </button>
+        
+        <!-- Status Indicator -->
+        <div id="automation-status-container" class="status-container hidden">
+          <div class="status-header">
+            <span class="pulse-indicator"></span>
+            <span id="automation-status-title">Idle</span>
+          </div>
+          <p id="automation-status-desc" class="status-desc"></p>
+          <button id="btn-reset-automation" class="btn-text hidden">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="stats-section glass">
+      <h2>Your Progress</h2>
+      
+      <div class="difficulty-bars">
+        <!-- Easy -->
+        <div class="diff-bar-container">
+          <div class="diff-bar-info">
+            <span class="diff-label easy">Easy</span>
+            <span class="diff-value" id="stats-easy">0 solved</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar easy" id="bar-easy" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Medium -->
+        <div class="diff-bar-container">
+          <div class="diff-bar-info">
+            <span class="diff-label medium">Medium</span>
+            <span class="diff-value" id="stats-medium">0 solved</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar medium" id="bar-medium" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Hard -->
+        <div class="diff-bar-container">
+          <div class="diff-bar-info">
+            <span class="diff-label hard">Hard</span>
+            <span class="diff-value" id="stats-hard">0 solved</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar hard" id="bar-hard" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-spent-summary">
+        <span class="summary-label">Total Focus Time:</span>
+        <span class="summary-value" id="total-focus-time">0h 0m</span>
+      </div>
+    </section>
+
+    <!-- History Section -->
+    <section class="history-section glass">
+      <h2>Recent Solves</h2>
+      <ul class="history-list" id="history-list">
+        <li class="empty-state">No solves recorded yet. Start coding!</li>
+      </ul>
+    </section>
+  </div>
+
+  <script type="module" src="./src/extension/popup/popup.ts"></script>
+</body>
+</html>
