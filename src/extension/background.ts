@@ -150,7 +150,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .catch(err => {
           if (isAutoSubmitting) {
             automationState.status = 'error';
-            automationState.errorMsg = `Failed to connect to backend for Git push: ${err.message}`;
+            let errorMsg = `Failed to connect to backend for Git push: ${err.message}`;
+            if (err.message && (err.message.includes('fetch') || err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
+              errorMsg = 'Failed to connect to local server. Please make sure the backend is running by executing "node server.js" in the project directory.';
+            }
+            automationState.errorMsg = errorMsg;
           }
           saveState();
           broadcastStateUpdate();
@@ -311,9 +315,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }, 800);
         } catch (err: any) {
+          let errorMsg = err.message || 'An error occurred during solving.';
+          if (errorMsg === 'Failed to fetch' || errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+            errorMsg = 'Failed to connect to local server. Please make sure the backend is running by executing "node server.js" in the project directory.';
+          }
           automationState = {
             status: 'error',
-            errorMsg: err.message || 'An error occurred during solving.'
+            errorMsg
           };
           saveState();
           broadcastStateUpdate();

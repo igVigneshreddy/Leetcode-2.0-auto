@@ -10,11 +10,13 @@ function detectLanguage(root: HTMLElement): string {
   const buttons = root.querySelectorAll('button');
   const commonLanguages = [
     'c++', 'java', 'python', 'python3', 'c#', 'javascript', 'typescript',
-    'c', 'go', 'rust', 'ruby', 'scala', 'kotlin', 'swift', 'php', 'typescript'
+    'c', 'go', 'rust', 'ruby', 'scala', 'kotlin', 'swift', 'php',
+    'erlang', 'elixir', 'racket', 'ocaml', 'dart', 'mysql', 'ms sql server',
+    'oracle', 'postgresql', 'pandas', 'bash'
   ];
 
   for (const btn of buttons) {
-    const txt = btn.textContent?.trim().toLowerCase() || '';
+    const txt = btn.textContent?.trim().toLowerCase().replace(/\s+/g, ' ') || '';
     if (commonLanguages.includes(txt)) {
       return btn.textContent?.trim() || 'Unknown';
     }

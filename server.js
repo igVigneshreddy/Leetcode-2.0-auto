@@ -144,10 +144,10 @@ function getExtension(language) {
   const lang = language.toLowerCase();
   if (lang.includes('javascript')) return 'js';
   if (lang.includes('typescript')) return 'ts';
-  if (lang.includes('python')) return 'py';
+  if (lang.includes('python') || lang.includes('pandas')) return 'py';
   if (lang.includes('cpp') || lang.includes('c++')) return 'cpp';
   if (lang.includes('java')) return 'java';
-  if (lang.includes('c#')) return 'cs';
+  if (lang.includes('c#') || lang.includes('csharp')) return 'cs';
   if (lang.includes('go')) return 'go';
   if (lang.includes('rust')) return 'rs';
   if (lang.includes('ruby')) return 'rb';
@@ -155,6 +155,14 @@ function getExtension(language) {
   if (lang.includes('kotlin')) return 'kt';
   if (lang.includes('swift')) return 'swift';
   if (lang.includes('php')) return 'php';
+  if (lang.includes('mysql') || lang.includes('sql') || lang.includes('oracle') || lang.includes('postgres')) return 'sql';
+  if (lang.includes('bash')) return 'sh';
+  if (lang.includes('racket')) return 'rkt';
+  if (lang.includes('erlang')) return 'erl';
+  if (lang.includes('elixir')) return 'ex';
+  if (lang.includes('dart')) return 'dart';
+  if (lang.includes('ocaml')) return 'ml';
+  if (lang === 'c') return 'c';
   if (lang.includes('c')) return 'c';
   return 'txt';
 }
@@ -164,9 +172,9 @@ async function handleSolveRequest(req, res) {
     const body = await getRequestBody(req);
     const { title, slug, difficulty, description, language, starterCode, apiKey } = body;
     
-    if (!apiKey) {
+    if (!apiKey || apiKey === 'undefined' || apiKey === 'null' || apiKey.trim() === '') {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: false, error: 'OpenRouter API Key is required. Please set it in the extension settings.' }));
+      res.end(JSON.stringify({ success: false, error: 'OpenRouter API Key is invalid or missing. Please open the settings (⚙️) in your extension and enter a valid OpenRouter API Key.' }));
       return;
     }
 
@@ -185,9 +193,13 @@ ${starterCode}
 
 Instructions:
 1. Write a complete, optimal, and correct implementation that runs correctly within the LeetCode editor.
-2. Return ONLY the raw code matching the requested language.
-3. Do NOT wrap your output in markdown code blocks like \`\`\`javascript or \`\`\`python. Just output the code directly.
-4. Do NOT include any explanations, introduction, markdown headers, or footnotes. Only output the code.`;
+2. Return ONLY the raw code matching the requested language (${language}).
+3. For Database/SQL problems (e.g., MySQL, MS SQL Server, Oracle, PostgreSQL), output the raw SQL query. Do not wrap it in a function or comments.
+4. For Shell problems (e.g., Bash), output the raw bash script/commands.
+5. For Algorithms, Concurrency, and Pandas problems, adhere strictly to the Starter Code template. Provide the implementation of the class/methods/functions as defined in the template.
+6. Do NOT wrap your output in markdown code blocks like \`\`\`javascript or \`\`\`python. Just output the code directly.
+7. Do NOT include any explanations, introduction, markdown headers, or footnotes. Only output the code.
+8. Do NOT include any comments (like block comments, inline comments, docstrings, explanatory comments, or description comments) inside the generated code. The code must contain only pure executable statements.`;
 
     const requestBody = JSON.stringify({
       model: 'google/gemini-2.5-flash',
@@ -243,14 +255,7 @@ async function handlePushRequest(req, res) {
       fs.mkdirSync(solutionsDir);
     }
     const filePath = path.join(solutionsDir, fileName);
-    const commentChar = (ext === 'py' || ext === 'rb') ? '#' : '//';
-    const fileContent = `${commentChar} LeetCode Problem: ${title}
-${commentChar} Difficulty: ${difficulty}
-${commentChar} Language: ${language}
-${commentChar} URL: https://leetcode.com/problems/${slug}/
-
-${code}
-`;
+    const fileContent = code;
     fs.writeFileSync(filePath, fileContent);
 
     // 2. Commit and Push
@@ -383,10 +388,10 @@ const server = http.createServer((req, res) => {
     const htmlPath = path.join(__dirname, 'mock_leetcode.html');
     if (fs.existsSync(htmlPath)) {
       let html = fs.readFileSync(htmlPath, 'utf8');
-      html = html.replace('{{TITLE}}', title);
-      html = html.replace('{{SLUG}}', slug);
-      html = html.replace('{{DIFFICULTY}}', difficulty);
-      html = html.replace('{{DIFF_CLASS}}', diffClass);
+      html = html.replace(/{{TITLE}}/g, title);
+      html = html.replace(/{{SLUG}}/g, slug);
+      html = html.replace(/{{DIFFICULTY}}/g, difficulty);
+      html = html.replace(/{{DIFF_CLASS}}/g, diffClass);
       
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(html);
@@ -398,10 +403,10 @@ const server = http.createServer((req, res) => {
   const htmlPath = path.join(__dirname, 'mock_leetcode.html');
   if (fs.existsSync(htmlPath)) {
     let html = fs.readFileSync(htmlPath, 'utf8');
-    html = html.replace('{{TITLE}}', 'Two Sum');
-    html = html.replace('{{SLUG}}', 'two-sum');
-    html = html.replace('{{DIFFICULTY}}', 'Easy');
-    html = html.replace('{{DIFF_CLASS}}', 'text-easy');
+    html = html.replace(/{{TITLE}}/g, 'Two Sum');
+    html = html.replace(/{{SLUG}}/g, 'two-sum');
+    html = html.replace(/{{DIFFICULTY}}/g, 'Easy');
+    html = html.replace(/{{DIFF_CLASS}}/g, 'text-easy');
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(html);
   } else {

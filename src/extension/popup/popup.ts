@@ -1,4 +1,5 @@
 import { StorageData, SubmissionResult, TimerState, UserStats, AutomationState, AppSettings } from '../../core/types';
+import { persistSettings } from '../../core/settings';
 
 // Element DOM references
 const streakCountEl = document.getElementById('streak-count')!;
@@ -74,7 +75,7 @@ function renderState(
   settings?: AppSettings
 ) {
   currentTimerState = timerState;
-  
+
   // 1. Render streak
   streakCountEl.textContent = String(stats.dailyStreak);
 
@@ -166,14 +167,14 @@ function renderState(
     inputGithubToken.value = settings.githubToken || '';
     inputGithubRepo.value = settings.githubRepo || '';
     inputGithubPath.value = settings.githubPath || '';
-    
+
     if (settings.pushMethod === 'github-api') {
       githubApiFields.classList.remove('collapsed');
     } else {
       githubApiFields.classList.add('collapsed');
     }
   }
-  
+
   // 6. Render automation state
   if (automationState) {
     renderAutomationState(automationState);
@@ -183,19 +184,19 @@ function renderState(
 // Render automation state dynamically
 function renderAutomationState(state: AutomationState) {
   statusContainer.className = 'status-container'; // Clear classes
-  
+
   if (state.status === 'idle') {
     statusContainer.classList.add('hidden');
     btnAutoSolve.disabled = false;
     btnAutoSolve.innerHTML = '<span class="btn-icon">⚡</span> Auto Solve & Submit';
     return;
   }
-  
+
   statusContainer.classList.remove('hidden');
   statusContainer.classList.add(state.status);
   statusTitle.textContent = state.status;
   btnAutoSolve.disabled = true;
-  
+
   let descText = '';
   switch (state.status) {
     case 'scraping':
@@ -227,7 +228,7 @@ function renderAutomationState(state: AutomationState) {
       btnResetAutomation.classList.remove('hidden');
       break;
   }
-  
+
   statusDesc.textContent = descText;
 }
 
@@ -250,7 +251,7 @@ function stopTicking() {
 // Update timer tick
 function updateTimerTick() {
   if (!currentTimerState || !currentTimerState.activeProblemSlug) return;
-  
+
   let elapsed = lastBaseTime;
   if (!currentTimerState.isPaused && currentTimerState.startTime) {
     elapsed += Date.now() - lastTimerFetchTime;
@@ -289,38 +290,54 @@ selectPushMethod.addEventListener('change', () => {
 });
 
 // Save settings to chrome storage
-btnSaveSettings.addEventListener('click', () => {
+btnSaveSettings.addEventListener('click', async () => {
+  const apiKeyInput = inputOpenRouterKey.value.trim();
+  if (!apiKeyInput || apiKeyInput === 'undefined' || apiKeyInput === 'null') {
+    alert('Please open settings (⚙️) and enter a valid OpenRouter API Key first.');
+    return;
+  }
+
   const newSettings: AppSettings = {
-    openRouterApiKey: inputOpenRouterKey.value.trim(),
+    openRouterApiKey: apiKeyInput,
     pushMethod: selectPushMethod.value as 'local-git' | 'github-api',
     githubToken: inputGithubToken.value.trim(),
     githubRepo: inputGithubRepo.value.trim(),
     githubPath: inputGithubPath.value.trim()
   };
-  
-  chrome.runtime.sendMessage({
-    type: 'SAVE_SETTINGS',
-    settings: newSettings
-  }, (response) => {
-    if (response && response.success) {
-      alert('Settings saved successfully!');
-      settingsDrawer.classList.add('collapsed');
-      refreshState();
-    }
-  });
+
+  const result = await persistSettings(
+    newSettings,
+    async (data) => {
+      await chrome.storage.local.set(data);
+    },
+    (message) => new Promise((resolve) => {
+      chrome.runtime.sendMessage(message, (response) => {
+        resolve(response);
+      });
+    })
+  );
+
+  if (result.success) {
+    alert('Settings saved successfully!');
+    settingsDrawer.classList.add('collapsed');
+    refreshState();
+  } else {
+    alert(`Failed to save settings: ${result.error || 'Unknown error'}`);
+  }
 });
 
 // Click Auto-Solve
 btnAutoSolve.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'GET_STATE' }, (response) => {
-    if (!response || !response.settings || !response.settings.openRouterApiKey) {
+    const key = response?.settings?.openRouterApiKey;
+    if (!key || key === 'undefined' || key === 'null') {
       alert('Please open settings (⚙️) and enter your OpenRouter API Key first.');
       settingsDrawer.classList.remove('collapsed');
       return;
     }
-    
+
     btnResetAutomation.classList.add('hidden');
-    
+
     chrome.runtime.sendMessage({ type: 'START_AUTO_SOLVE' }, (solveResponse) => {
       if (solveResponse && solveResponse.success) {
         refreshState();
