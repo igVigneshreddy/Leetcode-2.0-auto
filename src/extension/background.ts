@@ -11,10 +11,12 @@ let settings: AppSettings = {
   pushMethod: 'local-git',
   githubToken: '',
   githubRepo: '',
-  githubPath: ''
+  githubPath: '',
+  autoSolveNext: false
 };
 let autoSolveCount: number = 0;
 let visitedSlugsInCycle: string[] = [];
+let lastProcessedLanguage = '';
 
 // Initialize state from storage
 chrome.storage.local.get(['stats', 'history', 'timer', 'automationState', 'settings', 'autoSolveCount'], (result) => {
@@ -54,6 +56,20 @@ function broadcastStateUpdate() {
     settings
   }).catch(() => {
     // Ignore errors when no popup is open to receive
+  });
+
+  // Also notify the active tab's content script to sync page widgets
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const activeTab = tabs[0];
+    if (activeTab && activeTab.id) {
+      chrome.tabs.sendMessage(activeTab.id, {
+        type: 'STATE_UPDATED',
+        automationState,
+        settings
+      }).catch(() => {
+        // Ignore errors if the tab is not loaded or doesn't have listener
+      });
+    }
   });
 }
 
@@ -175,7 +191,7 @@ async function runSolveAndSubmitFlow(tabId: number) {
           saveState();
           broadcastStateUpdate();
         }
-      }, 1000);
+      }, 300);
     } catch (err: any) {
       let errorMsg = err.message || 'An error occurred during solving.';
       if (errorMsg === 'Failed to fetch' || errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
@@ -258,40 +274,8 @@ async function handleSuccessfulSolveCompletion(tabId: number) {
   autoSolveCount = (autoSolveCount || 0) + 1;
   saveState();
   
-  console.log(`[Background] Question solved successfully. Consecutive auto-solve count: ${autoSolveCount}/5`);
-
-  if (autoSolveCount >= 5) {
-    console.log('[Background] Auto-solve limit of 5 reached. Prompting user for permission to continue.');
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          return window.confirm("LeetCode Flow: You have automatically solved 5 questions in a row. Do you want to continue automatically solving more questions?");
-        }
-      });
-      const confirmed = results[0]?.result;
-      if (confirmed) {
-        console.log('[Background] User permitted continuation. Resetting count and navigating...');
-        autoSolveCount = 0;
-        saveState();
-        triggerNextQuestion(tabId);
-      } else {
-        console.log('[Background] User stopped automation.');
-        autoSolveCount = 0;
-        automationState.status = 'idle';
-        saveState();
-        broadcastStateUpdate();
-      }
-    } catch (err) {
-      console.error('Failed to execute confirmation prompt on page:', err);
-      autoSolveCount = 0;
-      automationState.status = 'idle';
-      saveState();
-      broadcastStateUpdate();
-    }
-  } else {
-    triggerNextQuestion(tabId);
-  }
+  console.log(`[Background] Question solved successfully. Consecutive auto-solve count: ${autoSolveCount}`);
+  triggerNextQuestion(tabId);
 }
 
 // Listen to messages from content scripts and popup
@@ -313,6 +297,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PROBLEM_LOADED') {
     const problem: ProblemInfo = message.problem;
     const currentState = timer.getState();
+    const problemLanguage: string = message.language || '';
 
     let isNewProblem = false;
     if (currentState.activeProblemSlug !== problem.slug) {
@@ -328,44 +313,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       timer.start(problem.slug, problem.title, problem.difficulty);
       saveState();
     }
+
+    const isLanguageChanged = problemLanguage && lastProcessedLanguage !== problemLanguage;
+    if (isNewProblem || isLanguageChanged) {
+      lastProcessedLanguage = problemLanguage;
+    }
     
     sendResponse({ success: true, timer: timer.getState() });
     broadcastStateUpdate();
 
-    // Auto solve and submit if enabled and it's a new problem (e.g. Next Question click)
-    if (isNewProblem && settings.autoSolveNext !== false && sender.tab && sender.tab.id) {
+    // Auto solve and submit if enabled and it's a new problem OR a manual language change
+    if ((isNewProblem || isLanguageChanged) && settings.autoSolveNext !== false && sender.tab && sender.tab.id) {
       const tabId = sender.tab.id;
       
-      // Prevent infinite skipping loops
-      if (visitedSlugsInCycle.includes(problem.slug)) {
-        console.log(`[Background] Detected loop or revisited slug ${problem.slug} during skip cycle. Stopping automation.`);
+      if (isLanguageChanged && !isNewProblem) {
+        // Explicit manual language switch: force solve immediately without skipping
+        console.log(`[Background] Language changed to ${problemLanguage} on same problem. Force solving in new language...`);
         visitedSlugsInCycle = [];
-        automationState.status = 'idle';
-        saveState();
-        broadcastStateUpdate();
-        return true;
-      }
-      
-      visitedSlugsInCycle.push(problem.slug);
-
-      const isAlreadySolvedInStats = stats.recentSolvedSlugs.includes(problem.slug);
-
-      chrome.tabs.sendMessage(tabId, { type: 'CHECK_IF_SOLVED' }, (isSolvedResponse) => {
-        const isSolvedOnPage = isSolvedResponse && isSolvedResponse.isSolved;
-        const isSolved = isAlreadySolvedInStats || isSolvedOnPage;
-
-        if (isSolved) {
-          console.log(`[Background] Problem ${problem.slug} is already solved. Skipping to next...`);
-          triggerNextQuestion(tabId);
-        } else {
-          // Unsolved! Clear cycle and trigger auto solve
+        setTimeout(() => {
+          runSolveAndSubmitFlow(tabId);
+        }, 400);
+      } else {
+        // Normal problem transition: prevent infinite loops
+        if (visitedSlugsInCycle.includes(problem.slug)) {
+          console.log(`[Background] Detected loop or revisited slug ${problem.slug} during skip cycle. Stopping automation.`);
           visitedSlugsInCycle = [];
-          console.log(`[Background] Problem ${problem.slug} is unsolved. Auto-solving...`);
-          setTimeout(() => {
-            runSolveAndSubmitFlow(tabId);
-          }, 1500);
+          automationState.status = 'idle';
+          saveState();
+          broadcastStateUpdate();
+          return true;
         }
-      });
+        
+        visitedSlugsInCycle.push(problem.slug);
+
+        const isAlreadySolvedInStats = stats.recentSolvedSlugs.includes(problem.slug);
+
+        chrome.tabs.sendMessage(tabId, { type: 'CHECK_IF_SOLVED' }, (isSolvedResponse) => {
+          const isSolvedOnPage = isSolvedResponse && isSolvedResponse.isSolved;
+          const isSolved = isAlreadySolvedInStats || isSolvedOnPage;
+
+          if (isSolved) {
+            console.log(`[Background] Problem ${problem.slug} is already solved. Skipping to next...`);
+            triggerNextQuestion(tabId);
+          } else {
+            // Unsolved! Clear cycle and trigger auto solve
+            visitedSlugsInCycle = [];
+            console.log(`[Background] Problem ${problem.slug} is unsolved. Auto-solving...`);
+            setTimeout(() => {
+              runSolveAndSubmitFlow(tabId);
+            }, 400);
+          }
+        });
+      }
     }
     return true;
   }
@@ -515,6 +514,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'SAVE_SETTINGS') {
     settings = message.settings;
+    saveState();
+    sendResponse({ success: true });
+    broadcastStateUpdate();
+    return true;
+  }
+
+  if (message.type === 'SET_AUTO_SOLVE_NEXT') {
+    settings.autoSolveNext = message.enabled;
     saveState();
     sendResponse({ success: true });
     broadcastStateUpdate();

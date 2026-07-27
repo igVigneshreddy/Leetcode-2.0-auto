@@ -3,6 +3,7 @@ import { ProblemInfo, SubmissionResult } from '../core/types';
 
 let currentProblem: ProblemInfo | null = null;
 let pollInterval: NodeJS.Timeout | null = null;
+let currentLanguage = '';
 
 // Scrape the editor's selected language
 function detectLanguage(root: HTMLElement): string {
@@ -31,31 +32,151 @@ function detectLanguage(root: HTMLElement): string {
   return 'JavaScript';
 }
 
+function updateWidgetUI(autoSolveEnabled: boolean) {
+  const btn = document.getElementById('leetcode-flow-control-btn');
+  if (btn) {
+    if (autoSolveEnabled) {
+      btn.textContent = 'Stop';
+      btn.style.background = '#ef4444'; // Red
+      btn.style.boxShadow = '0 4px 6px -1px rgba(239, 68, 68, 0.2)';
+    } else {
+      btn.textContent = 'Start';
+      btn.style.background = '#10b981'; // Green
+      btn.style.boxShadow = '0 4px 6px -1px rgba(16, 185, 129, 0.2)';
+    }
+  }
+}
+
+function injectAutomationWidget() {
+  let widget = document.getElementById('leetcode-flow-widget');
+  if (!widget) {
+    widget = document.createElement('div');
+    widget.id = 'leetcode-flow-widget';
+    
+    // Premium glassmorphism style
+    widget.setAttribute('style', `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 999999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 8px 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    `);
+
+    const label = document.createElement('span');
+    label.id = 'leetcode-flow-widget-label';
+    label.textContent = 'LeetCode Flow:';
+    label.setAttribute('style', `
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      font-weight: 600;
+    `);
+
+    const btn = document.createElement('button');
+    btn.id = 'leetcode-flow-control-btn';
+    btn.textContent = 'Start';
+    btn.setAttribute('style', `
+      background: #10b981;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+    `);
+
+    btn.addEventListener('mouseover', () => {
+      btn.style.filter = 'brightness(1.1)';
+      btn.style.transform = 'translateY(-1px)';
+    });
+    btn.addEventListener('mouseout', () => {
+      btn.style.filter = 'none';
+      btn.style.transform = 'none';
+    });
+    btn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'GET_STATE' }, (response) => {
+        if (!response) return;
+        const currentAutoSolveNext = response.settings?.autoSolveNext === true;
+        const targetEnabled = !currentAutoSolveNext;
+        
+        chrome.runtime.sendMessage({
+          type: 'SET_AUTO_SOLVE_NEXT',
+          enabled: targetEnabled
+        }, () => {
+          updateWidgetUI(targetEnabled);
+          if (targetEnabled) {
+            chrome.runtime.sendMessage({ type: 'START_AUTO_SOLVE' });
+          } else {
+            chrome.runtime.sendMessage({ type: 'RESET_AUTOMATION' });
+          }
+        });
+      });
+    });
+
+    widget.appendChild(label);
+    widget.appendChild(btn);
+    document.body.appendChild(widget);
+    
+    // Initial UI state setup from background storage
+    chrome.runtime.sendMessage({ type: 'GET_STATE' }, (response) => {
+      if (response && response.settings) {
+        updateWidgetUI(response.settings.autoSolveNext === true);
+      }
+    });
+  }
+}
+
 function handlePageLoad() {
   const pathname = window.location.pathname;
   const slug = extractSlugFromUrl(pathname);
+  const language = detectLanguage(document.body);
 
   if (!slug) {
     currentProblem = null;
+    currentLanguage = '';
+    const widget = document.getElementById('leetcode-flow-widget');
+    if (widget) widget.remove();
     return;
   }
 
-  // If we already parsed this problem, just make sure we keep tracking
-  if (currentProblem && currentProblem.slug === slug) {
+  // Inject the control widget on the LeetCode problem description page
+  injectAutomationWidget();
+
+  // If we already parsed this problem and the language is the same, just keep tracking submissions
+  if (currentProblem && currentProblem.slug === slug && currentLanguage === language) {
     checkForSubmissions();
     return;
   }
+
+  currentLanguage = language;
 
   // Try to parse problem details from page
   const parsed = parseProblemInfo(document.body, pathname);
   if (parsed && parsed.title && parsed.difficulty !== null) {
     currentProblem = parsed;
-    console.log('Parsed problem info:', currentProblem);
+    console.log('Parsed problem info (language changed/loaded):', currentProblem, 'Language:', language);
     
     // Notify background script that problem is loaded
     chrome.runtime.sendMessage({
       type: 'PROBLEM_LOADED',
-      problem: currentProblem
+      problem: currentProblem,
+      language: language
     }, (response) => {
       console.log('PROBLEM_LOADED response from background:', response);
     });
@@ -105,7 +226,7 @@ function checkForSubmissions() {
             console.log('SUBMISSION_DETECTED response:', response);
           });
         }
-      }, 800);
+      }, 200);
     }
   } else {
     // If the submission result container doesn't exist, we can reset processed status flags
@@ -121,7 +242,7 @@ function startObserver() {
   pollInterval = setInterval(() => {
     handlePageLoad();
     checkForSubmissions();
-  }, 1500);
+  }, 400);
 }
 
 // Start tracking
@@ -198,6 +319,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     sendResponse({ isSolved });
     return true;
+  }
+
+  if (message.type === 'STATE_UPDATED') {
+    if (message.settings) {
+      updateWidgetUI(message.settings.autoSolveNext === true);
+    }
   }
 });
 

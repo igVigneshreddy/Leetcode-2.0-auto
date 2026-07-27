@@ -133,10 +133,9 @@ function makeHttpsPut(url, headers, body) {
 }
 
 function cleanGeneratedCode(code) {
-  if (code.includes('```')) {
-    code = code.replace(/```[a-zA-Z0-9+#-]*\n/g, '');
-    code = code.replace(/```/g, '');
-  }
+  // Remove markdown code block markers like ```javascript, ```python, ```, etc.
+  code = code.replace(/```[a-zA-Z0-9+#-]*[\r\n]*/g, '');
+  code = code.replace(/```/g, '');
   return code.trim();
 }
 
@@ -194,12 +193,14 @@ ${starterCode}
 Instructions:
 1. Write a complete, optimal, and correct implementation that runs correctly within the LeetCode editor.
 2. Return ONLY the raw code matching the requested language (${language}).
-3. For Database/SQL problems (e.g., MySQL, MS SQL Server, Oracle, PostgreSQL), output the raw SQL query. Do not wrap it in a function or comments.
-4. For Shell problems (e.g., Bash), output the raw bash script/commands.
-5. For Algorithms, Concurrency, and Pandas problems, adhere strictly to the Starter Code template. Provide the implementation of the class/methods/functions as defined in the template.
+3. For Database/SQL problems (e.g., MySQL, MS SQL Server, Oracle, PostgreSQL), output the raw SQL query. Do NOT wrap it in a function or comments.
+4. For Shell problems (e.g., Bash), output the raw bash script/commands. Do NOT wrap in comments.
+5. For Algorithms, Concurrency, and Pandas problems, adhere strictly to the Starter Code template. Provide the implementation of the class/methods/functions as defined in the template. Do NOT modify the class or function names, arguments, or return types provided in the starter template.
 6. Do NOT wrap your output in markdown code blocks like \`\`\`javascript or \`\`\`python. Just output the code directly.
 7. Do NOT include any explanations, introduction, markdown headers, or footnotes. Only output the code.
-8. Do NOT include any comments (like block comments, inline comments, docstrings, explanatory comments, or description comments) inside the generated code. The code must contain only pure executable statements.`;
+8. Do NOT include any comments (like block comments, inline comments, docstrings, explanatory comments, or description comments) inside the generated code. The code must contain only pure executable statements.
+9. Ensure the code is complete and fully functional. Do NOT use placeholders, TODO comments, or omit parts of the solution.
+10. Ensure the code is syntactically valid and compiles perfectly in the target language (${language}).`;
 
     const requestBody = JSON.stringify({
       model: 'google/gemini-2.5-flash',
