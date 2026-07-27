@@ -65,6 +65,7 @@ export interface AppSettings {
   githubToken: string;
   githubRepo: string;
   githubPath: string;
+  autoSolveNext?: boolean;
 }
 
 export interface StorageData {

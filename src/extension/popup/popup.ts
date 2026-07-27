@@ -30,6 +30,7 @@ const inputGithubToken = document.getElementById('input-github-token') as HTMLIn
 const inputGithubRepo = document.getElementById('input-github-repo') as HTMLInputElement;
 const inputGithubPath = document.getElementById('input-github-path') as HTMLInputElement;
 const btnSaveSettings = document.getElementById('btn-save-settings') as HTMLButtonElement;
+const checkboxAutoSolveNext = document.getElementById('checkbox-auto-solve-next') as HTMLInputElement;
 
 const btnAutoSolve = document.getElementById('btn-auto-solve') as HTMLButtonElement;
 const statusContainer = document.getElementById('automation-status-container')!;
@@ -167,6 +168,9 @@ function renderState(
     inputGithubToken.value = settings.githubToken || '';
     inputGithubRepo.value = settings.githubRepo || '';
     inputGithubPath.value = settings.githubPath || '';
+    if (checkboxAutoSolveNext) {
+      checkboxAutoSolveNext.checked = settings.autoSolveNext !== false;
+    }
 
     if (settings.pushMethod === 'github-api') {
       githubApiFields.classList.remove('collapsed');
@@ -302,7 +306,8 @@ btnSaveSettings.addEventListener('click', async () => {
     pushMethod: selectPushMethod.value as 'local-git' | 'github-api',
     githubToken: inputGithubToken.value.trim(),
     githubRepo: inputGithubRepo.value.trim(),
-    githubPath: inputGithubPath.value.trim()
+    githubPath: inputGithubPath.value.trim(),
+    autoSolveNext: checkboxAutoSolveNext ? checkboxAutoSolveNext.checked : false
   };
 
   const result = await persistSettings(

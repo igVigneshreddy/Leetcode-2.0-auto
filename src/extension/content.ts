@@ -151,5 +151,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (message.type === 'CHECK_IF_SOLVED') {
+    let isSolved = false;
+
+    // 1. Look for SVG check circle or check icons
+    const svgs = document.querySelectorAll('svg');
+    for (const svg of svgs) {
+      const parentClass = svg.parentElement?.className || '';
+      const iconAttr = svg.getAttribute('data-icon') || '';
+      if (
+        iconAttr.includes('check') || 
+        svg.innerHTML.includes('check') || 
+        svg.classList.contains('text-brand-success') || 
+        svg.classList.contains('text-green-s') ||
+        parentClass.includes('text-brand-success') ||
+        parentClass.includes('text-green-s')
+      ) {
+        let el: HTMLElement | null = svg;
+        while (el && el !== document.body) {
+          if (el.className && (el.className.includes('title') || el.className.includes('question'))) {
+            isSolved = true;
+            break;
+          }
+          el = el.parentElement;
+        }
+        if (isSolved) break;
+      }
+    }
+
+    // 2. Check if a green checkmark or text "Solved" exists near the title
+    if (!isSolved) {
+      const successIcons = document.querySelectorAll('.text-brand-success, .text-green-s');
+      for (const el of successIcons) {
+        let parent: HTMLElement | null = el as HTMLElement;
+        while (parent && parent !== document.body) {
+          if (parent.className && (parent.className.includes('title') || parent.className.includes('question'))) {
+            isSolved = true;
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        if (isSolved) break;
+      }
+    }
+
+    sendResponse({ isSolved });
+    return true;
+  }
 });
 

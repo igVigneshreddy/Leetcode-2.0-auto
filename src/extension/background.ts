@@ -13,19 +13,22 @@ let settings: AppSettings = {
   githubRepo: '',
   githubPath: ''
 };
+let autoSolveCount: number = 0;
+let visitedSlugsInCycle: string[] = [];
 
 // Initialize state from storage
-chrome.storage.local.get(['stats', 'history', 'timer', 'automationState', 'settings'], (result) => {
+chrome.storage.local.get(['stats', 'history', 'timer', 'automationState', 'settings', 'autoSolveCount'], (result) => {
   if (result.stats) stats = result.stats;
   if (result.history) history = result.history;
   if (result.automationState) automationState = result.automationState;
   if (result.settings) settings = result.settings;
+  if (result.autoSolveCount !== undefined) autoSolveCount = result.autoSolveCount;
   
   // Rehydrate timer state if exists
   if (result.timer) {
     timer = new LeetCodeTimer(result.timer);
   }
-  console.log('Background state initialized:', { stats, history, timerState: timer.getState(), automationState, settings });
+  console.log('Background state initialized:', { stats, history, timerState: timer.getState(), automationState, settings, autoSolveCount });
 });
 
 // Helper to save complete state to storage
@@ -37,7 +40,7 @@ function saveState() {
     automationState,
     settings
   };
-  chrome.storage.local.set(data);
+  chrome.storage.local.set({ ...data, autoSolveCount });
 }
 
 // Helper to broadcast state updates to popup/tabs
@@ -52,6 +55,243 @@ function broadcastStateUpdate() {
   }).catch(() => {
     // Ignore errors when no popup is open to receive
   });
+}
+
+async function runSolveAndSubmitFlow(tabId: number) {
+  automationState = { status: 'scraping' };
+  saveState();
+  broadcastStateUpdate();
+
+  chrome.tabs.sendMessage(tabId, { type: 'GET_PROBLEM_DETAILS' }, async (response) => {
+    if (!response || !response.success) {
+      automationState = {
+        status: 'error',
+        errorMsg: response?.error || 'Make sure you are on a LeetCode problem page and it is loaded.'
+      };
+      saveState();
+      broadcastStateUpdate();
+      return;
+    }
+
+    const { info, starterCode, language } = response;
+    automationState.status = 'solving';
+    automationState.problemTitle = info.title;
+    saveState();
+    broadcastStateUpdate();
+
+    try {
+      const solveRes = await fetch('http://localhost:8080/api/solve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: info.title,
+          slug: info.slug,
+          difficulty: info.difficulty,
+          description: info.description,
+          language,
+          starterCode,
+          apiKey: settings.openRouterApiKey
+        })
+      });
+
+      if (!solveRes.ok) {
+        const errData = await solveRes.json();
+        throw new Error(errData.error || `Server returned status ${solveRes.status}`);
+      }
+
+      const solveData = await solveRes.json();
+      if (!solveData.success) {
+        throw new Error(solveData.error || 'Solve request failed on server.');
+      }
+
+      automationState.status = 'injecting';
+      saveState();
+      broadcastStateUpdate();
+
+      // Inject code via scripting in the MAIN world context to interface with Monaco Editor API
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: (codeToInject) => {
+          try {
+            const models = (window as any).monaco?.editor?.getModels();
+            if (models && models.length > 0) {
+              models.forEach((model: any) => {
+                model.setValue(codeToInject);
+              });
+              return true;
+            }
+          } catch (e) {
+            console.error('Failed to set Monaco value:', e);
+          }
+          
+          // Fallback for mock editor or standard textarea
+          try {
+            const editorBox = document.getElementById('monaco-editor');
+            if (editorBox) {
+              editorBox.innerHTML = '';
+              const lines = codeToInject.split('\n');
+              lines.forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'view-line';
+                div.textContent = line;
+                editorBox.appendChild(div);
+              });
+              return true;
+            }
+          } catch (e) {
+            console.error('Failed to set fallback editor value:', e);
+          }
+          return false;
+        },
+        args: [solveData.code]
+      });
+
+      // Wait 1000ms and click submit via scripting API
+      setTimeout(async () => {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              const submitBtn = document.querySelector('button[data-e2e-locator="console-submit-button"]') || 
+                                document.querySelector('button.submit__24vi') ||
+                                document.getElementById('submit-btn');
+              if (submitBtn) {
+                (submitBtn as HTMLElement).click();
+                return true;
+              }
+              return false;
+            }
+          });
+
+          automationState.status = 'submitting';
+          saveState();
+          broadcastStateUpdate();
+        } catch (err: any) {
+          automationState = {
+            status: 'error',
+            errorMsg: `Failed to trigger submit: ${err.message}`
+          };
+          saveState();
+          broadcastStateUpdate();
+        }
+      }, 1000);
+    } catch (err: any) {
+      let errorMsg = err.message || 'An error occurred during solving.';
+      if (errorMsg === 'Failed to fetch' || errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+        errorMsg = 'Failed to connect to local server. Please make sure the backend is running by executing "node server.js" in the project directory.';
+      }
+      automationState = {
+        status: 'error',
+        errorMsg
+      };
+      saveState();
+      broadcastStateUpdate();
+    }
+  });
+}
+
+async function triggerNextQuestion(tabId: number) {
+  console.log('[Background] Navigating to the next question...');
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        let nextBtn = document.querySelector('[data-e2e-locator="next-question-btn"]') ||
+                      document.querySelector('.next-question-btn') ||
+                      document.querySelector('.next-btn') ||
+                      document.querySelector('a[href*="/problems/"][class*="next"]');
+                      
+        if (!nextBtn) {
+          nextBtn = document.querySelector('[aria-label*="Next problem"]') ||
+                    document.querySelector('[title*="Next problem"]') ||
+                    document.querySelector('[aria-label*="Next Question"]') ||
+                    document.querySelector('[title*="Next Question"]') ||
+                    document.querySelector('[aria-label*="Next"]') ||
+                    document.querySelector('[title*="Next"]');
+        }
+        
+        if (!nextBtn) {
+          const SVGs = document.querySelectorAll('svg');
+          for (const svg of SVGs) {
+            if (svg.innerHTML.includes('chevron-right') || svg.innerHTML.includes('arrow-right') || svg.getAttribute('data-icon') === 'chevron-right') {
+              let parent = svg.parentElement;
+              while (parent && parent !== document.body) {
+                if (parent.tagName === 'A' || parent.tagName === 'BUTTON') {
+                  const parentText = parent.textContent?.trim().toLowerCase() || '';
+                  if (!parentText.includes('run') && !parentText.includes('submit')) {
+                    nextBtn = parent;
+                    break;
+                  }
+                }
+                parent = parent.parentElement;
+              }
+              if (nextBtn) break;
+            }
+          }
+        }
+
+        if (!nextBtn) {
+          const anchors = document.querySelectorAll('a, button');
+          for (const el of anchors) {
+            const text = el.textContent?.trim().toLowerCase() || '';
+            if (text === 'next' || text === 'next question' || text === 'next problem') {
+              nextBtn = el;
+              break;
+            }
+          }
+        }
+
+        if (nextBtn) {
+          (nextBtn as HTMLElement).click();
+          return true;
+        }
+        return false;
+      }
+    });
+  } catch (err) {
+    console.error('Failed to trigger navigation to next question:', err);
+  }
+}
+
+async function handleSuccessfulSolveCompletion(tabId: number) {
+  autoSolveCount = (autoSolveCount || 0) + 1;
+  saveState();
+  
+  console.log(`[Background] Question solved successfully. Consecutive auto-solve count: ${autoSolveCount}/5`);
+
+  if (autoSolveCount >= 5) {
+    console.log('[Background] Auto-solve limit of 5 reached. Prompting user for permission to continue.');
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          return window.confirm("LeetCode Flow: You have automatically solved 5 questions in a row. Do you want to continue automatically solving more questions?");
+        }
+      });
+      const confirmed = results[0]?.result;
+      if (confirmed) {
+        console.log('[Background] User permitted continuation. Resetting count and navigating...');
+        autoSolveCount = 0;
+        saveState();
+        triggerNextQuestion(tabId);
+      } else {
+        console.log('[Background] User stopped automation.');
+        autoSolveCount = 0;
+        automationState.status = 'idle';
+        saveState();
+        broadcastStateUpdate();
+      }
+    } catch (err) {
+      console.error('Failed to execute confirmation prompt on page:', err);
+      autoSolveCount = 0;
+      automationState.status = 'idle';
+      saveState();
+      broadcastStateUpdate();
+    }
+  } else {
+    triggerNextQuestion(tabId);
+  }
 }
 
 // Listen to messages from content scripts and popup
@@ -74,7 +314,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const problem: ProblemInfo = message.problem;
     const currentState = timer.getState();
 
+    let isNewProblem = false;
     if (currentState.activeProblemSlug !== problem.slug) {
+      isNewProblem = true;
       if (currentState.activeProblemSlug) {
         timer.stop();
       }
@@ -86,8 +328,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       timer.start(problem.slug, problem.title, problem.difficulty);
       saveState();
     }
+    
     sendResponse({ success: true, timer: timer.getState() });
     broadcastStateUpdate();
+
+    // Auto solve and submit if enabled and it's a new problem (e.g. Next Question click)
+    if (isNewProblem && settings.autoSolveNext !== false && sender.tab && sender.tab.id) {
+      const tabId = sender.tab.id;
+      
+      // Prevent infinite skipping loops
+      if (visitedSlugsInCycle.includes(problem.slug)) {
+        console.log(`[Background] Detected loop or revisited slug ${problem.slug} during skip cycle. Stopping automation.`);
+        visitedSlugsInCycle = [];
+        automationState.status = 'idle';
+        saveState();
+        broadcastStateUpdate();
+        return true;
+      }
+      
+      visitedSlugsInCycle.push(problem.slug);
+
+      const isAlreadySolvedInStats = stats.recentSolvedSlugs.includes(problem.slug);
+
+      chrome.tabs.sendMessage(tabId, { type: 'CHECK_IF_SOLVED' }, (isSolvedResponse) => {
+        const isSolvedOnPage = isSolvedResponse && isSolvedResponse.isSolved;
+        const isSolved = isAlreadySolvedInStats || isSolvedOnPage;
+
+        if (isSolved) {
+          console.log(`[Background] Problem ${problem.slug} is already solved. Skipping to next...`);
+          triggerNextQuestion(tabId);
+        } else {
+          // Unsolved! Clear cycle and trigger auto solve
+          visitedSlugsInCycle = [];
+          console.log(`[Background] Problem ${problem.slug} is unsolved. Auto-solving...`);
+          setTimeout(() => {
+            runSolveAndSubmitFlow(tabId);
+          }, 1500);
+        }
+      });
+    }
     return true;
   }
 
@@ -137,15 +416,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (data.success) {
             if (isAutoSubmitting) {
               automationState.status = 'success';
+              saveState();
+              broadcastStateUpdate();
+              if (sender.tab && sender.tab.id) {
+                handleSuccessfulSolveCompletion(sender.tab.id);
+              }
             }
           } else {
             if (isAutoSubmitting) {
               automationState.status = 'error';
               automationState.errorMsg = `Git push failed: ${data.error}`;
+              saveState();
+              broadcastStateUpdate();
             }
           }
-          saveState();
-          broadcastStateUpdate();
         })
         .catch(err => {
           if (isAutoSubmitting) {
@@ -155,15 +439,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               errorMsg = 'Failed to connect to local server. Please make sure the backend is running by executing "node server.js" in the project directory.';
             }
             automationState.errorMsg = errorMsg;
+            saveState();
+            broadcastStateUpdate();
           }
-          saveState();
-          broadcastStateUpdate();
         });
       } else {
         if (isAutoSubmitting) {
           automationState.status = 'success';
           saveState();
           broadcastStateUpdate();
+          if (sender.tab && sender.tab.id) {
+            handleSuccessfulSolveCompletion(sender.tab.id);
+          }
         }
       }
     } else {
@@ -182,10 +469,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'START_AUTO_SOLVE') {
-    automationState = { status: 'scraping' };
-    saveState();
-    broadcastStateUpdate();
-
     // Query active tab to extract details
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const activeTab = tabs[0];
@@ -200,136 +483,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      chrome.tabs.sendMessage(activeTab.id, { type: 'GET_PROBLEM_DETAILS' }, async (response) => {
-        if (!response || !response.success) {
-          automationState = {
-            status: 'error',
-            errorMsg: response?.error || 'Make sure you are on a LeetCode problem page and it is loaded.'
-          };
-          saveState();
-          broadcastStateUpdate();
-          return;
-        }
-
-        const { info, starterCode, language } = response;
-        automationState.status = 'solving';
-        automationState.problemTitle = info.title;
-        saveState();
-        broadcastStateUpdate();
-
-        try {
-          const solveRes = await fetch('http://localhost:8080/api/solve', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: info.title,
-              slug: info.slug,
-              difficulty: info.difficulty,
-              description: info.description,
-              language,
-              starterCode,
-              apiKey: settings.openRouterApiKey
-            })
-          });
-
-          if (!solveRes.ok) {
-            const errData = await solveRes.json();
-            throw new Error(errData.error || `Server returned status ${solveRes.status}`);
-          }
-
-          const solveData = await solveRes.json();
-          if (!solveData.success) {
-            throw new Error(solveData.error || 'Solve request failed on server.');
-          }
-
-          automationState.status = 'injecting';
-          saveState();
-          broadcastStateUpdate();
-
-          // Inject code via scripting in the MAIN world context to interface with Monaco Editor API
-          await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            world: 'MAIN',
-            func: (codeToInject) => {
-              try {
-                const models = (window as any).monaco?.editor?.getModels();
-                if (models && models.length > 0) {
-                  models.forEach((model: any) => {
-                    model.setValue(codeToInject);
-                  });
-                  return true;
-                }
-              } catch (e) {
-                console.error('Failed to set Monaco value:', e);
-              }
-              
-              // Fallback for mock editor or standard textarea
-              try {
-                const editorBox = document.getElementById('monaco-editor');
-                if (editorBox) {
-                  editorBox.innerHTML = '';
-                  const lines = codeToInject.split('\n');
-                  lines.forEach(line => {
-                    const div = document.createElement('div');
-                    div.className = 'view-line';
-                    div.textContent = line;
-                    editorBox.appendChild(div);
-                  });
-                  return true;
-                }
-              } catch (e) {
-                console.error('Failed to set fallback editor value:', e);
-              }
-              return false;
-            },
-            args: [solveData.code]
-          });
-
-          // Wait 600ms and click submit via scripting API
-          setTimeout(async () => {
-            try {
-              await chrome.scripting.executeScript({
-                target: { tabId: activeTab.id },
-                func: () => {
-                  const submitBtn = document.querySelector('button[data-e2e-locator="console-submit-button"]') || 
-                                    document.querySelector('button.submit__24vi') ||
-                                    document.getElementById('submit-btn');
-                  if (submitBtn) {
-                    (submitBtn as HTMLElement).click();
-                    return true;
-                  }
-                  return false;
-                }
-              });
-
-              automationState.status = 'submitting';
-              saveState();
-              broadcastStateUpdate();
-            } catch (err: any) {
-              automationState = {
-                status: 'error',
-                errorMsg: `Failed to trigger submit: ${err.message}`
-              };
-              saveState();
-              broadcastStateUpdate();
-            }
-          }, 800);
-        } catch (err: any) {
-          let errorMsg = err.message || 'An error occurred during solving.';
-          if (errorMsg === 'Failed to fetch' || errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
-            errorMsg = 'Failed to connect to local server. Please make sure the backend is running by executing "node server.js" in the project directory.';
-          }
-          automationState = {
-            status: 'error',
-            errorMsg
-          };
-          saveState();
-          broadcastStateUpdate();
-        }
-      });
+      runSolveAndSubmitFlow(activeTab.id);
+      sendResponse({ success: true });
     });
-
-    sendResponse({ success: true });
     return true;
   }
 
